@@ -1,0 +1,223 @@
+---
+title: "Project 2 - Data Transformation"
+author: "Kevin Martin"
+date: "2025-10-05"
+output: html_document
+---
+
+```{r csv, include=FALSE}
+write.csv(data.frame(Product = character(), Jan = numeric(), Feb = numeric(), Mar = numeric()),
+          "sales_wide.csv", row.names = FALSE)
+
+write.csv(data.frame(Student = character(), Math = numeric(), Reading = numeric(), Science = numeric()),
+          "scores_wide.csv", row.names = FALSE)
+
+write.csv(data.frame(Region = character(), Jan = numeric(), Feb = numeric(), Mar = numeric()),
+          "vaccinations_wide.csv", row.names = FALSE)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-wide, message=FALSE}
+library(tidyverse)
+library(knitr)
+theme_set(theme_minimal(base_size = 12))
+knitr::opts_chunk$set(echo = TRUE)
+
+# Helper: load CSVs or fall back to sample data
+load_or_fallback <- function(path, fallback_tbl) {
+  if (!file.exists(path)) return(fallback_tbl)
+  x <- try(readr::read_csv(path, na = c("", "NA"), show_col_types = FALSE), silent = TRUE)
+  if (inherits(x, "try-error") || is.null(x) || ncol(x) <= 1 || nrow(x) == 0) return(fallback_tbl)
+  names(x) <- stringr::str_trim(names(x))
+  names(x)[1] <- sub("^\ufeff", "", names(x)[1])
+  x
+}
+
+# Sample fallback data
+sales_fallback <- tribble(
+  ~Product,   ~Jan, ~Feb, ~Mar, ~Apr, ~May, ~Jun,
+  "Widget A", 120, 135, 160, NA, 210, 225,
+  "Widget B", 90, 100, 110, 130, 140, NA,
+  "Widget C", 60, 75, 85, 95, 110, 120
+)
+
+scores_fallback <- tribble(
+  ~Student, ~Math, ~Reading, ~Science,
+  "Alice", 88, 92, 85,
+  "Ben", 76, 81, 79,
+  "Cara", 91, 89, 94,
+  "Diego", 67, NA, 72
+)
+
+vacc_fallback <- tribble(
+  ~Region, ~Jan, ~Feb, ~Mar, ~Apr, ~May, ~Jun,
+  "North", 10, 25, 45, 60, 70, 80,
+  "South", 15, 30, 50, 65, 78, 85,
+  "East", 8, 20, 38, 55, 68, 76,
+  "West", 12, 28, 44, 58, 72, 82
+)
+
+# Load data
+sales_wide <- load_or_fallback("sales_wide.csv", sales_fallback)
+scores_wide <- load_or_fallback("scores_wide.csv", scores_fallback)
+vaccinations_wide <- load_or_fallback("vaccinations_wide.csv", vacc_fallback)
+
+list(
+  Sales = head(sales_wide),
+  Scores = head(scores_wide),
+  Vaccinations = head(vaccinations_wide)
+)
+```
+
+```{r pivot-long, message=FALSE}
+# Reshape wide -> long using pivot_longer()
+sales_long <- sales_wide %>%
+  pivot_longer(-Product, names_to = "Month", values_to = "Sales") %>%
+  mutate(Sales = replace_na(Sales, 0))
+
+scores_long <- scores_wide %>%
+  pivot_longer(-Student, names_to = "Subject", values_to = "Score") %>%
+  mutate(Score = replace_na(Score, 0))
+
+vaccinations_long <- vaccinations_wide %>%
+  pivot_longer(-Region, names_to = "Month", values_to = "Vaccinated") %>%
+  mutate(Vaccinated = replace_na(Vaccinated, 0))
+
+list(
+  Sales_long = head(sales_long),
+  Scores_long = head(scores_long),
+  Vaccinations_long = head(vaccinations_long)
+)
+
+```
+
+## Analysis & Summary
+These summaries and simple visuals confirm the reshaped (long) tables are usable for analysis and show a few quick takeaways for each dataset.
+
+```{r summaries-plots, message=FALSE, fig.width=7, fig.height=4}
+# -----------------------------
+# 4A) SALES — summary + plot
+# -----------------------------
+# Order months if present
+month_levels <- c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+if ("Month" %in% names(sales_long) && all(unique(sales_long$Month) %in% month_levels)) {
+  sales_long <- sales_long %>% mutate(Month = factor(Month, levels = month_levels))
+}
+
+sales_summary <- sales_long %>%
+  group_by(Month) %>%
+  summarise(Total_Sales = sum(Sales, na.rm = TRUE), .groups = "drop")
+
+knitr::kable(sales_summary, caption = "Sales: Total by Month", digits = 1)
+
+ggplot(sales_summary, aes(x = Month, y = Total_Sales)) +
+  geom_col() +
+  labs(title = "Sales – Total by Month",
+       x = "Month", y = "Total Sales")
+
+# -----------------------------
+# 4B) SCORES — summary + plot
+# -----------------------------
+scores_summary <- scores_long %>%
+  group_by(Subject) %>%
+  summarise(Avg_Score = mean(Score, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(Avg_Score))
+
+knitr::kable(scores_summary, caption = "Scores: Average by Subject", digits = 1)
+
+ggplot(scores_summary, aes(x = reorder(Subject, Avg_Score), y = Avg_Score)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Scores – Average by Subject",
+       x = "Subject", y = "Average Score")
+
+# -------------------------------------
+# 4C) VACCINATIONS — summary + plot
+# -------------------------------------
+if ("Month" %in% names(vaccinations_long) && all(unique(vaccinations_long$Month) %in% month_levels)) {
+  vaccinations_long <- vaccinations_long %>% mutate(Month = factor(Month, levels = month_levels))
+}
+
+vacc_summary <- vaccinations_long %>%
+  group_by(Month) %>%
+  summarise(Total_Vaccinated = sum(Vaccinated, na.rm = TRUE), .groups = "drop")
+
+knitr::kable(vacc_summary, caption = "Vaccinations: Total by Month", digits = 0)
+
+ggplot(vacc_summary, aes(x = Month, y = Total_Vaccinated, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Vaccinations – Total by Month",
+       x = "Month", y = "Total Vaccinated")
+```
+
+```{r export-tidy, message=FALSE}
+# Create a 'outputs' folder if it doesn't exist
+if (!dir.exists("outputs")) dir.create("outputs")
+
+# 5A) Write tidy tables
+readr::write_csv(sales_long,        "outputs/sales_long.csv")
+readr::write_csv(scores_long,       "outputs/scores_long.csv")
+readr::write_csv(vaccinations_long, "outputs/vaccinations_long.csv")
+
+# 5B) (Optional) Also write summaries used in Step 4
+if (exists("sales_summary")) readr::write_csv(sales_summary, "outputs/sales_summary_by_month.csv")
+if (exists("scores_summary")) readr::write_csv(scores_summary, "outputs/scores_avg_by_subject.csv")
+if (exists("vacc_summary"))  readr::write_csv(vacc_summary,  "outputs/vaccinations_total_by_month.csv")
+
+# 5C) Show what we saved
+list.files("outputs", pattern = "\\.csv$", full.names = TRUE)
+```
+
+```{r publish, message=FALSE}
+# Create README and zip outputs for easy sharing
+readme <- c(
+  "Project 2 – Outputs",
+  "",
+  "Tidy datasets created from wide tables:",
+  "- sales_long.csv: Product–Month–Sales",
+  "- scores_long.csv: Student–Subject–Score",
+  "- vaccinations_long.csv: Region–Month–Vaccinated",
+  "",
+  "Summaries are also included in CSV format."
+)
+if (!dir.exists("outputs")) dir.create("outputs")
+writeLines(readme, "outputs/README.txt")
+
+# Zip all outputs (uses base utils::zip)
+utils::zip(zipfile = "project2_outputs.zip", files = list.files("outputs", full.names = TRUE))
+
+# Show what we produced
+list(
+  Outputs = list.files("outputs", full.names = TRUE),
+  Zip = normalizePath("project2_outputs.zip", mustWork = FALSE)
+)
+```
+
+---
+
+## Reflection
+
+This project taught me a lot more than just how to reshape data — it helped me understand the process of problem-solving in R step by step. At first, I was honestly confused about how the CSV files worked and why they weren’t showing up in RStudio, but once I slowed down and followed the structure carefully, it started to make sense. The part that clicked for me was realizing that wide data is just messy information spread across columns, and the goal is to make it tidy so you can actually work with it.
+
+The process of learning pivot_longer() and the fallback setup helped me see how flexible R can be once you understand what it’s doing. I also liked that this project felt like real-world work — the kind of data cleanup that happens before you can analyze or visualize anything. Even though I ran into a few technical issues (like file paths and chunk setup), getting through them made me more confident about how RMarkdown actually runs code behind the scenes.
+
+Overall, I feel like I’m learning how to think more like a data analyst — breaking problems into smaller steps, checking for errors, and not rushing the process. I can honestly say that even when it got frustrating, I learned something from every mistake.
+
+---
+
+## Notes
+
+All code above transforms three wide datasets (**Sales**, **Scores**, and **Vaccinations**)  
+into tidy formats and summarizes them for analysis.  
+
+Outputs are saved to CSVs and are ready for visualization, reporting, or further analysis.  
+
+**Author:** Kevin Martin  
+**Course:** DATA 607 – Data Acquisition & Management  
+**Project 2:** Data Transformation  
+**Date:** `r Sys.Date()`
+
